@@ -1,0 +1,42 @@
+task_type: classification
+output_dir: output/finetune
+device: cuda
+epochs: 1
+clip_grad: 1.0
+metric_key: balanced_acc # Changed to match LaBraM
+val_freq_split: 5 # How many times to validate per epoch (0 to disable)
+
+# Logging
+enable_wandb: true
+project: "ptft-project"
+entity: "bci-foundation-model" 
+api_key: "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" # Optional, can be set via env var
+
+dataset:
+  name: TUAB
+  dataset_dir: /vepfs-0x0d/eeg-data/TUAB # Updated path
+  seed: 42
+  batch_size: 256 
+  num_workers: 8
+  cache_path: output/finetune/dataset_index.json # Explicit cache path
+
+model:
+  use_pretrained: true
+  pretrained_path: /vePFS-0x0d/home/chen/related_projects/CBraMod/pretrained_weights/pretrained_weights.pth
+  in_dim: 200
+  d_model: 200
+  dim_feedforward: 800
+  seq_len: 30
+  n_layer: 12
+  nhead: 8
+  dropout: 0.1
+  num_classes: 1
+  head_type: pooling # New option for GAP
+
+loss:
+  name: bce_with_logits
+
+optimizer:
+  name: AdamW
+  lr: 0.001 # Updated LR
+  weight_decay: 0.05

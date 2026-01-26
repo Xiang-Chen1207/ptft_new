@@ -1,0 +1,57 @@
+task_type: pretraining
+output_dir: output/pretrain
+device: cuda
+epochs: 100 # Pretraining usually takes more epochs
+clip_grad: 1.0
+metric_key: val_loss # For pretraining, loss is the key metric
+val_freq_split: 5 # How many times to validate per epoch (0 to disable)
+
+# Logging
+enable_wandb: true
+project: "eeg-knowledge-engine"
+entity: "bci-foundation-model"
+api_key: "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"
+
+dataset:
+  name: TUEG
+  dataset_dir: /vePFS-0x0d/pretrain-clip/output_tuh_full_pipeline/merged_final_dataset
+  seed: 42
+  batch_size: 128
+  num_workers: 8
+  cache_path: output/pretrain/dataset_index.json
+  feature_path: '/vePFS-0x0d/pretrain-clip/feature_analysis/features_final_zscore.csv'
+  # Pretraining specific dataset params if any (e.g., masking)
+
+model:
+  use_pretrained: false # Start from scratch
+  in_dim: 200 # Input dimension of the EEG signal (after patching/projection)
+  d_model: 200 # Transformer hidden dimension
+  dim_feedforward: 800
+  seq_len: 30 # Number of patches (10 for TUEG)
+  n_layer: 12
+  nhead: 8
+  dropout: 0.1
+  
+  # --- Pretraining Tasks ---
+  pretrain_tasks: ['reconstruction', 'feature_pred'] # Options: reconstruction, feature_pred
+
+  # --- Feature Prediction ---
+  feature_dim: 62 # Number of z-scored target features
+  feature_token_type: 'cross_attn' # Options: gap, cross_attn
+  feature_token_strategy: 'single' # Options: single, all, group (only for cross_attn)
+  feature_group_count: 5 # Only for 'group' strategy 
+  # num_classes ignored for pretraining usually
+  
+loss:
+  name: mse # Reconstruction loss often uses MSE
+  feature_loss_weight: 1.0
+  
+optimizer:
+  name: AdamW
+  lr: 0.001 # Typical pretraining LR
+  weight_decay: 0.05
+
+scheduler:
+  name: CosineAnnealingLR
+  T_max: 100 # Should match epochs
+  eta_min: 1.0e-6
