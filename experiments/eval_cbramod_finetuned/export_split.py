@@ -42,7 +42,7 @@ def _split_subjects(subject_files, seed, ratios=(0.8, 0.1)):
 def main():
     data_root = "/vepfs-0x0d/eeg-data/TUAB"
     output_dir = os.path.dirname(os.path.abspath(__file__))
-    seed = 0 # Match evaluation seed
+    seed = 42  # Match other experiments (finetune.yaml, extract_features.py)
     
     print(f"Data Root: {data_root}")
     print(f"Seed: {seed}")

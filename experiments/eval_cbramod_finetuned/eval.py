@@ -52,7 +52,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_size = 128
     num_workers = 8
-    seed = 0 # Match training seed
+    seed = 42  # Match other experiments (finetune.yaml, extract_features.py)
     
     print(f"Device: {device}")
     

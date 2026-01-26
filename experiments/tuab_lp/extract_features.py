@@ -32,13 +32,20 @@ def get_config(model_type):
         },
         'task_type': 'pretraining'
     }
-    
+
     if model_type == 'neuro_ke':
+        # Multi-task: reconstruction + feature prediction
         config['model']['pretrain_tasks'] = ['reconstruction', 'feature_pred']
         config['model']['feature_token_type'] = 'cross_attn'
         config['model']['feature_token_strategy'] = 'single'
         config['model']['feature_dim'] = 62
-        
+    elif model_type == 'feat_only':
+        # Single-task: feature prediction only (sanity_feat_only)
+        config['model']['pretrain_tasks'] = ['feature_pred']
+        config['model']['feature_token_type'] = 'cross_attn'
+        config['model']['feature_token_strategy'] = 'single'
+        config['model']['feature_dim'] = 62
+
     return config
 
 def load_model(model_type, weights_path, device):
@@ -105,8 +112,8 @@ def extract_features_dataset(model, dataset, device, batch_size, num_workers, mo
             eeg_feat = feats.mean(dim=[1, 2])
             eeg_feats_list.append(eeg_feat.cpu().numpy())
             
-            # 2. Feat Token & Predicted Features (Cross Attn) - Only for Neuro-KE
-            if model_type == 'neuro_ke':
+            # 2. Feat Token & Predicted Features (Cross Attn) - For Neuro-KE and Feat-Only
+            if model_type in ['neuro_ke', 'feat_only']:
                 B, C, N, D = feats.shape
                 feats_flat = feats.view(B, C * N, D)
                 query = model.feat_query.expand(B, -1, -1)
@@ -143,7 +150,7 @@ def extract_features_dataset(model, dataset, device, batch_size, num_workers, mo
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_type', type=str, choices=['recon', 'neuro_ke'], required=True)
+    parser.add_argument('--model_type', type=str, choices=['recon', 'neuro_ke', 'feat_only'], required=True)
     parser.add_argument('--dataset_dir', type=str, default='/vepfs-0x0d/eeg-data/TUAB')
     parser.add_argument('--weights_path', type=str, required=True)
     parser.add_argument('--output_dir', type=str, default='experiments/tuab_lp/features')
@@ -187,7 +194,7 @@ def main():
         'test_subjects': test_data['subjects']
     }
     
-    if args.model_type == 'neuro_ke':
+    if args.model_type in ['neuro_ke', 'feat_only']:
         save_dict['train_feat'] = train_data['feat']
         save_dict['test_feat'] = test_data['feat']
         if train_data['pred'] is not None and test_data['pred'] is not None:
