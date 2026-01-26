@@ -92,10 +92,25 @@ class CBraModWrapper(nn.Module):
 
     def _init_classification_head(self, model_config):
         head_type = model_config.get('head_type', 'flatten')
-        
+        self.cls_head_type = model_config.get('cls_head_type', 'eeg')  # eeg, feat, full
+
         if head_type == 'pooling':
             self.fc_norm = nn.LayerNorm(self.d_model)
-            self.head = nn.Linear(self.d_model, self.num_classes)
+
+            # Determine input dimension based on cls_head_type
+            if self.cls_head_type == 'full':
+                # EEG (GAP) + Feature token concatenated
+                cls_input_dim = self.d_model * 2
+                self._init_cls_cross_attn()
+            elif self.cls_head_type == 'feat':
+                # Feature token only
+                cls_input_dim = self.d_model
+                self._init_cls_cross_attn()
+            else:
+                # EEG (GAP) only - default
+                cls_input_dim = self.d_model
+
+            self.head = nn.Linear(cls_input_dim, self.num_classes)
         else:
             self.fc_norm = nn.Identity()
             self.head = nn.Sequential(
@@ -108,6 +123,11 @@ class CBraModWrapper(nn.Module):
                 nn.Dropout(self.dropout),
                 nn.Linear(200, self.num_classes),
             )
+
+    def _init_cls_cross_attn(self):
+        """Initialize cross-attention components for classification feature token."""
+        self.cls_feat_query = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        self.cls_feat_attn = nn.MultiheadAttention(embed_dim=self.d_model, num_heads=4, batch_first=True)
 
     def _load_pretrained_weights(self, model_config):
         if not model_config.get('use_pretrained', False):
@@ -179,17 +199,47 @@ class CBraModWrapper(nn.Module):
 
     def _forward_classification(self, x):
         feats = self.backbone(x)
-        
+
         if isinstance(self.fc_norm, nn.LayerNorm):
-            # Global Average Pooling
-            pooled = feats.mean(dim=[1, 2])
-            out = self.head(self.fc_norm(pooled))
+            # Global Average Pooling for EEG features
+            eeg_feat = feats.mean(dim=[1, 2])  # (B, D)
+
+            cls_head_type = getattr(self, 'cls_head_type', 'eeg')
+
+            if cls_head_type == 'full':
+                # EEG + Feature token concatenated
+                # Apply LayerNorm to each feature separately before concatenation
+                feat_token = self._get_cls_feat_token(feats)  # (B, D)
+                eeg_normed = self.fc_norm(eeg_feat)
+                feat_normed = self.fc_norm(feat_token)
+                combined = torch.cat([eeg_normed, feat_normed], dim=-1)  # (B, 2*D)
+                out = self.head(combined)
+            elif cls_head_type == 'feat':
+                # Feature token only
+                feat_token = self._get_cls_feat_token(feats)  # (B, D)
+                out = self.head(self.fc_norm(feat_token))
+            else:
+                # EEG (GAP) only - default
+                out = self.head(self.fc_norm(eeg_feat))
         else:
             out = self.head(feats)
-            
+
         if self.num_classes == 1:
             out = out.view(-1)
         return out
+
+    def _get_cls_feat_token(self, feats):
+        """Extract feature token via cross-attention for classification."""
+        B, C, N, D = feats.shape
+        feats_flat = feats.view(B, C * N, D)
+
+        # Expand query: (B, 1, D)
+        query = self.cls_feat_query.expand(B, -1, -1)
+
+        # Cross Attention
+        attn_output, _ = self.cls_feat_attn(query, feats_flat, feats_flat)
+
+        return attn_output.squeeze(1)  # (B, D)
 
     def _generate_mask(self, x):
         # Generate random mask (50% masking)
