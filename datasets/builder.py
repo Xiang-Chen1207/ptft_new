@@ -37,6 +37,66 @@ def build_dataset(name, config, mode='train'):
         
         # 2. Initialize Dataset
         return TUABDataset(file_list=file_list, **config)
+    elif name == 'TUEP':
+        from .tuep import TUEPDataset, get_tuep_file_list
+        dataset_dir = config.get('dataset_dir')
+        seed = config.get('seed', 42)
+        
+        # 1. Get split files
+        file_list = get_tuep_file_list(dataset_dir, mode, seed=seed)
+        
+        # Handle Tiny Mode
+        if config.get('tiny', False):
+            print(f"[{mode}] Tiny mode active: Limiting file list to 10 files.")
+            file_list = file_list[:10]
+            
+        # 2. Initialize Dataset
+        return TUEPDataset(file_list=file_list, **config)
+    elif name == 'TUEV':
+        from .tuev import TUEVDataset, get_tuev_file_list
+        dataset_dir = config.get('dataset_dir')
+        seed = config.get('seed', 42)
+        
+        # 1. Get split files
+        file_list = get_tuev_file_list(dataset_dir, mode, seed=seed)
+        
+        # Handle Tiny Mode
+        if config.get('tiny', False):
+            print(f"[{mode}] Tiny mode active: Limiting file list to 10 files.")
+            file_list = file_list[:10]
+            
+        # 2. Initialize Dataset
+        return TUEVDataset(file_list=file_list, **config)
+    elif name == 'TUSZ':
+        from .tusz import TUSZDataset, get_tusz_file_list
+        dataset_dir = config.get('dataset_dir')
+        seed = config.get('seed', 42)
+        
+        # 1. Get split files
+        file_list = get_tusz_file_list(dataset_dir, mode, seed=seed)
+        
+        # Handle Tiny Mode
+        if config.get('tiny', False):
+            print(f"[{mode}] Tiny mode active: Limiting file list to 10 files.")
+            file_list = file_list[:10]
+            
+        # 2. Initialize Dataset
+        return TUSZDataset(file_list=file_list, mode=mode, **config)
+    elif name == 'SEED':
+        from .seed import SEEDDataset, get_seed_file_list
+        dataset_dir = config.get('dataset_dir')
+        seed = config.get('seed', 42)
+        
+        # 1. Get split files
+        file_list = get_seed_file_list(dataset_dir, mode, seed=seed)
+        
+        # Handle Tiny Mode
+        if config.get('tiny', False):
+            print(f"[{mode}] Tiny mode active: Limiting file list to 5 files.")
+            file_list = file_list[:5]
+            
+        # 2. Initialize Dataset
+        return SEEDDataset(file_list=file_list, mode=mode, **config)
     else:
         raise ValueError(f"Dataset {name} not supported")
 
@@ -54,5 +114,8 @@ def build_dataloader(name, config, mode='train'):
         batch_size=config.get('batch_size', 32),
         shuffle=shuffle,
         num_workers=config.get('num_workers', 4),
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        pin_memory=True,
+        persistent_workers=config.get('persistent_workers', True),
+        prefetch_factor=config.get('prefetch_factor', 4) if config.get('num_workers', 4) > 0 else None
     )

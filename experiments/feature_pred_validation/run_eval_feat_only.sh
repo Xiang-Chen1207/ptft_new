@@ -6,9 +6,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
-: "${CHECKPOINT:=output_old/sanity_feat_only/best.pth}"
+: "${CHECKPOINT:=/vepfs-0x0d/home/cx/ptft/output/sanity_feat_only_all_60s/checkpoint_epoch_27.pth}"
 : "${CONFIG:=configs/pretrain.yaml}"
-: "${OUTPUT:=feature_metrics_eval_feat_only.csv}"
+: "${OUTPUT:=/vepfs-0x0d/home/cx/ptft/experiments/feature_pred_validation/60sfeature_metrics_eval_feat_only.csv}"
 : "${BATCH_SIZE:=256}"
 : "${DEVICE:=cuda}"
 
@@ -17,6 +17,8 @@ python eval_features.py \
   --checkpoint "$CHECKPOINT" \
   --output "$OUTPUT" \
   --batch_size "$BATCH_SIZE" \
-  --device "$DEVICE"
+  --device "$DEVICE" \
+  --dataset TUEG \
+  --split val
 
 echo "Done. Metrics saved to $OUTPUT"

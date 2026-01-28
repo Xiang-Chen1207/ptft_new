@@ -1,0 +1,46 @@
+task_type: classification
+output_dir: output/finetune_tuev
+device: cuda
+epochs: 10 # TUEV is smaller, 10-20 epochs might be enough
+clip_grad: 1.0
+metric_key: balanced_acc
+val_freq_split: 5
+
+# Logging
+enable_wandb: true
+project: "ptft-project-tuev"
+entity: "bci-foundation-model" 
+api_key: "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"
+
+# Dataset Selection
+selected_dataset: TUEV
+
+datasets:
+  TUEV:
+    name: TUEV
+    dataset_dir: /vePFS-0x0d/pretrain-clip/benchmark_dataloader/hdf5_output/TUH_Events
+    cache_path: output/finetune_tuev/dataset_index.json
+    seed: 42
+    batch_size: 256
+    num_workers: 8
+
+model:
+  use_pretrained: true
+  pretrained_path: /vePFS-0x0d/home/chen/related_projects/CBraMod/pretrained_weights/pretrained_weights.pth
+  in_dim: 200
+  d_model: 200
+  dim_feedforward: 800
+  seq_len: 1 # TUEV 1s * 200Hz = 200 points = 1 patch of 200
+  n_layer: 12
+  nhead: 8
+  dropout: 0.1
+  num_classes: 6 # TUEV has 6 classes
+  head_type: pooling
+
+loss:
+  name: bce_with_logits # or cross_entropy, but bce works for multi-label too if needed. TUEV is technically multi-label capable but we use it as 6-class.
+
+optimizer:
+  name: AdamW
+  lr: 0.0004
+  weight_decay: 0.05

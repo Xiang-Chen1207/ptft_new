@@ -95,8 +95,8 @@ def main():
         
     print(f"Available Feature Types: {feature_types}")
     print("\n=== Results Table ===")
-    print(f"{'Ratio':<8} | {'NumSub':<6} | {'Feature':<10} | {'Dim':<5} | {'Acc':<7} | {'BAcc':<7} | {'Converged':<9}")
-    print("-" * 75)
+    print(f"| {'Ratio':<8} | {'NumSub':<6} | {'Feature':<10} | {'Dim':<5} | {'Acc':<7} | {'BAcc':<7} | {'Converged':<9} |")
+    print(f"|{'-'*10}|{'-'*8}|{'-'*12}|{'-'*7}|{'-'*9}|{'-'*9}|{'-'*11}|")
     
     unique_train_subjects = np.unique(data['train_subjects'])
     total_subjects = len(unique_train_subjects)
@@ -156,7 +156,7 @@ def main():
             )
             
             conv_str = "Yes" if converged else "NO"
-            print(f"{ratio_display:<8} | {n_subs:<6} | {ftype:<10} | {dim:<5} | {acc*100:.2f}% | {bacc*100:.2f}% | {conv_str}")
+            print(f"| {ratio_display:<8} | {n_subs:<6} | {ftype:<10} | {dim:<5} | {acc*100:.2f}% | {bacc*100:.2f}% | {conv_str} |")
 
 if __name__ == '__main__':
     main()

@@ -3,7 +3,7 @@ output_dir: output/pretrain
 device: cuda
 epochs: 100 # Pretraining usually takes more epochs
 clip_grad: 1.0
-metric_key: val_loss # For pretraining, loss is the key metric
+metric_key: loss # For pretraining, loss is the key metric
 val_freq_split: 5 # How many times to validate per epoch (0 to disable)
 
 # Logging

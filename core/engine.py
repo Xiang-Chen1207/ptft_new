@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score, f1_score, cohen_kappa_score, confusion_matrix
 import utils.util as utils
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, epoch, scheduler=None, max_norm=1.0, log_writer=None, val_loader=None, val_freq=50, task_type="classification", feature_loss_weight=0.0):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, epoch, scheduler=None, max_norm=1.0, log_writer=None, val_loader=None, val_freq=50, task_type="classification", feature_loss_weight=0.0, use_dynamic_loss=True):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -53,20 +53,38 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, epoch, sche
                  
                  if mask is None: mask = gen_mask
              
-             # Initialize total loss
+             # Initialize losses
              loss = 0.0
+             recon_loss = None
+             feat_loss = None
              
              # Reconstruction loss
              if outputs is not None:
                  recon_loss = criterion(outputs, x, mask=mask)
-                 loss = loss + recon_loss
                  metric_logger.update(recon_loss=recon_loss.item())
              
-             # Feature Loss
+             # Feature loss
              if feature_pred is not None and target_features is not None:
-                 loss_feat = F.mse_loss(feature_pred, target_features)
-                 loss = loss + feature_loss_weight * loss_feat
-                 metric_logger.update(loss_feat=loss_feat.item())
+                 feat_loss = F.mse_loss(feature_pred, target_features)
+                 metric_logger.update(loss_feat=feat_loss.item())
+                 
+             # Dynamic Balancing
+             if recon_loss is not None and feat_loss is not None:
+                 if use_dynamic_loss:
+                     with torch.no_grad():
+                         # Balance gradients by balancing loss magnitudes
+                         dynamic_weight = (recon_loss.detach() / (feat_loss.detach() + 1e-8))
+                         dynamic_weight = torch.clamp(dynamic_weight, 0.5, 50.0)
+                         dynamic_weight = dynamic_weight * feature_loss_weight
+                 
+                     loss = recon_loss + dynamic_weight * feat_loss
+                     metric_logger.update(feat_weight=dynamic_weight.item())
+                 else:
+                     loss = recon_loss + feature_loss_weight * feat_loss
+             elif recon_loss is not None:
+                 loss = recon_loss
+             elif feat_loss is not None:
+                 loss = feature_loss_weight * feat_loss
                  
              # Lightweight Training Metrics (No Viz)
              with torch.no_grad():
@@ -257,8 +275,11 @@ def evaluate(model, dataloader, criterion, device, task_type="classification", l
                  if mask is None: mask = gen_mask
              
              loss = 0.0
+             recon_loss = 0.0
              if outputs is not None:
-                loss = loss + criterion(outputs, x, mask=mask)
+                recon_loss = criterion(outputs, x, mask=mask)
+                loss = loss + recon_loss
+                metric_logger.update(recon_loss=recon_loss.item())
              
              # Calculate Pretraining Metrics
              with torch.no_grad():
@@ -270,7 +291,7 @@ def evaluate(model, dataloader, criterion, device, task_type="classification", l
                  
                  if feature_pred is not None and target_features is not None:
                      loss_feat = F.mse_loss(feature_pred, target_features)
-                     loss = loss + 0.0 * loss_feat # Just to track loss, not backward
+                     loss = loss + loss_feat # Accumulate feature loss
                      metrics_feat = utils.calc_regression_metrics(feature_pred, target_features)
                      metric_logger.update(feat_pcc=metrics_feat['pcc'])
                      metric_logger.update(feat_r2=metrics_feat['r2'])
@@ -307,6 +328,10 @@ def evaluate(model, dataloader, criterion, device, task_type="classification", l
         
         # Only collect preds/targets for classification
         if task_type == "classification":
+            # Optimization: Only store necessary predictions for metrics
+            # To avoid OOM, we process batches incrementally if possible, 
+            # but for global metrics like AUC/Kappa we need all preds.
+            # We can at least move to CPU immediately (which is already done).
             preds.append(outputs.cpu())
             targets.append(y.cpu())
             
@@ -329,10 +354,11 @@ def evaluate(model, dataloader, criterion, device, task_type="classification", l
     }
     if hasattr(metric_logger, 'acc'):
          metrics["acc"] = metric_logger.acc.global_avg
-    if hasattr(metric_logger, 'recon_pcc'):
-         metrics["recon_pcc"] = metric_logger.recon_pcc.global_avg
-    if hasattr(metric_logger, 'feat_r2'):
-         metrics["feat_r2"] = metric_logger.feat_r2.global_avg
+    
+    # Pretraining metrics
+    for key in ['recon_loss', 'loss_feat', 'recon_pcc', 'recon_r2', 'feat_pcc', 'feat_r2']:
+        if hasattr(metric_logger, key):
+             metrics[key] = getattr(metric_logger, key).global_avg
     
     # Top-K Feature Logging
     if acc_r2_per_channel is not None and num_batches > 0:
@@ -377,7 +403,7 @@ def evaluate(model, dataloader, criterion, device, task_type="classification", l
     if task_type == "pretraining" and log_writer is not None:
         if last_batch_viz is not None:
             try:
-                print(f"Generating visualization for {header}...")
+                # print(f"Generating visualization for {header}...")
                 fig = utils.visualize_eeg_batch(
                     last_batch_viz['x'], 
                     last_batch_viz['x_hat'], 
@@ -393,7 +419,7 @@ def evaluate(model, dataloader, criterion, device, task_type="classification", l
         else:
             print(f"WARNING: last_batch_viz is None! Validation loop might have been skipped or failed to store data.")
 
-    if task_type == "classification":
+    if task_type == "classification" and len(preds) > 0:
         # Global metrics
         preds = torch.cat(preds)
         targets = torch.cat(targets)

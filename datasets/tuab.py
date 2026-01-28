@@ -7,6 +7,7 @@ import numpy as np
 from torch.utils.data import Dataset
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
+from collections import OrderedDict
 
 # --- Splitting Logic from cbramod_tuab/run_finetuning.py ---
 
@@ -110,7 +111,7 @@ def _index_worker(h5_path):
     return samples
 
 class TUABDataset(Dataset):
-    def __init__(self, file_list, input_size=2000, transform=None, cache_path='dataset_index.json', **kwargs):
+    def __init__(self, file_list, input_size=12000, transform=None, cache_path='dataset_index.json', **kwargs):
         super().__init__()
         self.input_size = input_size
         self.transform = transform
@@ -130,6 +131,10 @@ class TUABDataset(Dataset):
                 print(f"Warning: Channel {target} not found in source map.")
         
         self.samples = self._load_or_generate_index(file_list, cache_path)
+        
+        # File handle cache
+        self.file_cache = OrderedDict()
+        self.cache_size = 128 # Keep 128 files open per worker
 
     def _load_or_generate_index(self, file_list, cache_path):
         full_index = []
@@ -195,27 +200,50 @@ class TUABDataset(Dataset):
         
         data = np.zeros((len(self.channel_indices), self.input_size), dtype=np.float32)
         try:
-            with h5py.File(h5_path, 'r') as f:
-                group = f[trial_key][seg_key] if seg_key else f[trial_key]
-                if 'eeg' in group:
-                    raw = group['eeg'][:]
-                elif 'data' in group:
-                    raw = group['data'][:]
-                else:
-                    raise KeyError("No data")
+            # Manage File Cache
+            if h5_path in self.file_cache:
+                f = self.file_cache[h5_path]
+                self.file_cache.move_to_end(h5_path)
+            else:
+                if len(self.file_cache) >= self.cache_size:
+                    old_path, old_f = self.file_cache.popitem(last=False)
+                    try:
+                        old_f.close()
+                    except:
+                        pass
+                
+                # Optimize read with 4MB chunk cache, use latest libver for speed
+                f = h5py.File(h5_path, 'r', rdcc_nbytes=4*1024*1024, libver='latest')
+                self.file_cache[h5_path] = f
 
-                if raw.shape[0] != 21 and raw.shape[1] == 21:
-                    raw = raw.T
-                
-                raw = raw[self.channel_indices, :]
-                
-                if raw.shape[1] < self.input_size:
-                    pad = self.input_size - raw.shape[1]
-                    data = np.pad(raw, ((0,0), (0, pad)), 'constant')
-                else:
-                    data = raw[:, :self.input_size]
+            # Read Data
+            group = f[trial_key][seg_key] if seg_key else f[trial_key]
+            if 'eeg' in group:
+                raw = group['eeg'][:]
+            elif 'data' in group:
+                raw = group['data'][:]
+            else:
+                raise KeyError(f"No data found in {h5_path} key {trial_key}/{seg_key}")
+
+            if raw.shape[0] != 21 and raw.shape[1] == 21:
+                raw = raw.T
+            
+            raw = raw[self.channel_indices, :]
+            
+            if raw.shape[1] < self.input_size:
+                pad = self.input_size - raw.shape[1]
+                data = np.pad(raw, ((0,0), (0, pad)), 'constant')
+            else:
+                data = raw[:, :self.input_size]
         except Exception as e:
-            # print(f"Error loading {h5_path}: {e}")
+            # If cache error, try to reopen
+            if h5_path in self.file_cache:
+                try:
+                    self.file_cache.pop(h5_path).close()
+                except:
+                    pass
+            print(f"Error loading {h5_path}: {e}")
+            # Still pass to avoid crashing training, but now we know about it
             pass
 
         tensor = torch.from_numpy(data).float()

@@ -1,0 +1,7 @@
+torch>=2.0.0
+numpy
+scikit-learn
+pyyaml
+wandb
+einops
+matplotlib

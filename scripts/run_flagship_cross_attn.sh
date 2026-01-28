@@ -1,9 +1,9 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 # Flagship Experiment: Multi-task with Cross-Attention (Single Token)
-# Single GPU Version (GPU 1)
+# Multi-GPU Version (Using 4 GPUs via DataParallel)
 # stdbuf -oL -eL conda run --no-capture-output -n labram python eval_features.py --config configs/pretrain.yaml --checkpoint /vePFS-0x0d/home/chen/ptft/output/flagship_cross_attn/best.pth --output feature_metrics_eval_zero_mask.csv
-OUTPUT_DIR="output/flagship_cross_attn"
+OUTPUT_DIR="output/flagship_cross_attn_all_60s"
 mkdir -p $OUTPUT_DIR
 
 echo "Starting Flagship Experiment: Multi-task (Cross-Attention Single)"
@@ -22,20 +22,24 @@ elif [ -n "$RESUME_PATH" ]; then
     RESUME_ARG="--resume $RESUME_PATH"
 fi
 
-# Using GPU 1
-CUDA_VISIBLE_DEVICES=1 python3 main.py \
+# Start Training
+python3 main.py \
   --config configs/pretrain.yaml \
   $RESUME_ARG \
   --opts \
     model.pretrain_tasks=['reconstruction','feature_pred'] \
     model.feature_token_type='cross_attn' \
     model.feature_token_strategy='single' \
+    loss.feature_loss_weight=10.0 \
     output_dir=$OUTPUT_DIR \
     enable_wandb=true \
     project="ptft-flagship" \
     epochs=20 \
-    dataset.batch_size=1024 \
-    optimizer.lr=1e-3 \
-    val_freq_split=10
+    dataset.batch_size=512 \
+    optimizer.lr=4e-3 \
+    val_freq_split=10 \
+    dataset.input_size=12000 \
+    model.seq_len=60 \
+    dataset.cache_path="output/dataset_index_60s.json"
 
 echo "Flagship Experiment Finished."

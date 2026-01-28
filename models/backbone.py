@@ -8,6 +8,18 @@ class PatchEmbedding(nn.Module):
     def __init__(self, in_dim, out_dim, d_model, seq_len):
         super().__init__()
         self.d_model = d_model
+        
+        # Determine patch size and FFT size
+        # in_dim is expected to be input_size (e.g. 12000) or patch_size?
+        # Based on forward: x shape is (bz, ch_num, patch_num, patch_size)
+        # So in_dim passed here is likely irrelevant or confusingly named if it's not patch_size.
+        # However, backbone init takes in_dim=200, which is patch_size.
+        
+        # Hardcoded params exposed
+        self.patch_size = in_dim 
+        self.freq_bins = self.patch_size // 2 + 1 # e.g. 200 -> 101
+        self.conv_channels = 25 # Could be config param
+        
         self.positional_encoding = nn.Sequential(
             nn.Conv2d(in_channels=d_model, out_channels=d_model, kernel_size=(19, 7), stride=(1, 1), padding=(9, 3),
                       groups=d_model),
@@ -16,20 +28,20 @@ class PatchEmbedding(nn.Module):
         # self.mask_encoding = nn.Parameter(torch.randn(in_dim), requires_grad=True)
 
         self.proj_in = nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=25, kernel_size=(1, 49), stride=(1, 25), padding=(0, 24)),
-            nn.GroupNorm(5, 25),
+            nn.Conv2d(in_channels=1, out_channels=self.conv_channels, kernel_size=(1, 49), stride=(1, 25), padding=(0, 24)),
+            nn.GroupNorm(5, self.conv_channels),
             nn.GELU(),
 
-            nn.Conv2d(in_channels=25, out_channels=25, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1)),
-            nn.GroupNorm(5, 25),
+            nn.Conv2d(in_channels=self.conv_channels, out_channels=self.conv_channels, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1)),
+            nn.GroupNorm(5, self.conv_channels),
             nn.GELU(),
 
-            nn.Conv2d(in_channels=25, out_channels=25, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1)),
-            nn.GroupNorm(5, 25),
+            nn.Conv2d(in_channels=self.conv_channels, out_channels=self.conv_channels, kernel_size=(1, 3), stride=(1, 1), padding=(0, 1)),
+            nn.GroupNorm(5, self.conv_channels),
             nn.GELU(),
         )
         self.spectral_proj = nn.Sequential(
-            nn.Linear(101, d_model),
+            nn.Linear(self.freq_bins, d_model),
             nn.Dropout(0.1),
             # nn.LayerNorm(d_model, eps=1e-5),
         )
@@ -40,7 +52,15 @@ class PatchEmbedding(nn.Module):
             mask_x = x
         else:
             mask_x = x.clone()
-            mask_x[mask == 1] = self.mask_encoding
+            # Explicit broadcast for safety and clarity
+            # mask: (B, C, N) -> (B, C, N, 1)
+            # mask_encoding: (P,) -> (1, 1, 1, P)
+            # This line works due to numpy-style advanced indexing, but explicit is better if dimensions mismatch
+            # mask_x[mask == 1] = self.mask_encoding
+            
+            # Safer implementation:
+            mask_bool = (mask == 1).unsqueeze(-1) # (B, C, N, 1)
+            mask_x = torch.where(mask_bool, self.mask_encoding.view(1, 1, 1, -1), mask_x)
 
         mask_x = mask_x.contiguous().view(bz, 1, ch_num * patch_num, patch_size)
         patch_emb = self.proj_in(mask_x)
@@ -48,7 +68,7 @@ class PatchEmbedding(nn.Module):
 
         mask_x = mask_x.contiguous().view(bz*ch_num*patch_num, patch_size)
         spectral = torch.fft.rfft(mask_x, dim=-1, norm='forward')
-        spectral = torch.abs(spectral).contiguous().view(bz, ch_num, patch_num, 101)
+        spectral = torch.abs(spectral).contiguous().view(bz, ch_num, patch_num, self.freq_bins)
         spectral_emb = self.spectral_proj(spectral)
         patch_emb = patch_emb + spectral_emb
 

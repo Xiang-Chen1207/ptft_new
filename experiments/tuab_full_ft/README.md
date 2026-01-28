@@ -7,27 +7,41 @@
 
 | 模型 | 检查点 | 预训练任务 | 说明 |
 |-----|--------|----------|------|
-| **Recon (Baseline)** | `output_old/baseline_recon/best.pth` | 仅重建 | 标准 MAE 预训练 |
+| **Recon (Baseline)** | `/vePFS-0x0d/home/chen/.../pretrained_weights.pth` | 仅重建 | 标准 MAE 预训练 |
 | **Neuro-KE (Flagship)** | `output_old/flagship_cross_attn/best.pth` | 重建 + 特征预测 | 多任务联合预训练 |
 | **Feat-Only (Sanity)** | `output_old/sanity_feat_only/best.pth` | 仅特征预测 | 验证特征预测有效性 |
 
 ## 运行
 
-### Recon Baseline（仅重建预训练）
+可以使用统一脚本 `run_experiment.sh` 运行实验，或使用对应的快捷脚本。
+
+### 统一脚本
+
 ```bash
-bash run_full_ft_recon.sh
+# 运行指定模型 (recon, feat_only, neuro_ke)
+bash experiments/tuab_full_ft/run_experiment.sh neuro_ke [gpu_id]
+
+# 顺序运行所有模型
+bash experiments/tuab_full_ft/run_experiment.sh all [gpu_id]
+```
+
+### 快捷方式
+
+#### Recon Baseline（仅重建预训练）
+```bash
+bash run_full_ft_recon.sh [gpu_id]
 ```
 输出目录：`output/finetune_recon/`
 
-### Neuro-KE（重建+特征预测联合预训练）
+#### Neuro-KE（重建+特征预测联合预训练）
 ```bash
-bash run_full_ft_neuro_ke.sh
+bash run_full_ft_neuro_ke.sh [gpu_id]
 ```
 输出目录：`output/finetune_neuro_ke/`
 
-### Feat-Only（仅特征预测预训练）
+#### Feat-Only（仅特征预测预训练）
 ```bash
-bash run_full_ft_feat_only.sh
+bash run_full_ft_feat_only.sh [gpu_id]
 ```
 输出目录：`output/finetune_feat_only/`
 

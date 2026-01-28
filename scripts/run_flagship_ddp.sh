@@ -11,7 +11,6 @@ echo "Using 4 GPUs (0,1,2,3). Batch Size: 128 per GPU -> 512 Total."
 
 # Set CUDA_VISIBLE_DEVICES to ensure we use the right cards
 export CUDA_VISIBLE_DEVICES=0,1,2,3
-
 # Use torchrun for distributed launch
 # Note: val_freq_split=10 ensures frequent validation for monitoring
 torchrun --nproc_per_node=4 --master_port=29501 main.py \

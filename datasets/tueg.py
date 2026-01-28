@@ -7,6 +7,7 @@ import numpy as np
 from torch.utils.data import Dataset
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
+from collections import OrderedDict
 
 # --- Splitting Logic (adapted from TUAB) ---
 
@@ -27,7 +28,7 @@ def _group_files_by_subject(all_h5_files):
         subject_files[subject_id].append(f)
     return subject_files
 
-def get_tueg_file_list(dataset_dir, mode='train', seed=42):
+def get_tueg_file_list(dataset_dir, mode='train', seed=42, subset_fraction=None):
     """
     Get file list for TUEG.
     For pretraining, we typically use ALL data as 'train'.
@@ -62,6 +63,24 @@ def get_tueg_file_list(dataset_dir, mode='train', seed=42):
         'test': [] # Usually no test set for pretraining
     }
     
+    # Apply subset fraction if requested (only for train)
+    if mode == 'train' and subset_fraction is not None:
+        try:
+            subset_fraction = float(subset_fraction)
+            if 0.0 < subset_fraction < 1.0:
+                original_train = splits['train']
+                n_original = len(original_train)
+                n_keep = int(n_original * subset_fraction)
+                n_keep = max(1, n_keep) # Keep at least 1
+                
+                print(f"[{mode}] Subsetting active: Using {subset_fraction:.2%} of subjects.")
+                print(f"Reducing training subjects from {n_original} to {n_keep}.")
+                
+                # Since unique_subjects was already shuffled, taking the first n_keep is a random sample
+                splits['train'] = original_train[:n_keep]
+        except ValueError:
+            print(f"Warning: Invalid subset_fraction {subset_fraction}, ignoring.")
+
     # If mode is not recognized or we want everything, just return everything?
     # But standard trainer expects 'train' and 'val' loaders.
     
@@ -167,6 +186,10 @@ class TUEGDataset(Dataset):
                 print(f"Warning: Channel {target} not found in source map.")
         
         self.samples = self._load_or_generate_index(file_list, cache_path)
+        
+        # File handle cache
+        self.file_cache = OrderedDict()
+        self.cache_size = 64 # Keep 64 files open per worker
 
     def _load_or_generate_index(self, file_list, cache_path):
         full_index = []
@@ -209,7 +232,36 @@ class TUEGDataset(Dataset):
                 print(f"Warning: Could not save cache: {e}")
                 
         filtered_samples = [s for s in full_index if s['file_path'] in input_files_set]
+        
+        # Filter samples that don't have features if feature_map is loaded
+        if self.feature_map is not None:
+            print(f"Filtering samples without features (Total before: {len(filtered_samples)})...")
+            valid_samples = []
+            missing_count = 0
+            for s in filtered_samples:
+                basename = os.path.basename(s['file_path'])
+                seg_key = s['segment_key']
+                
+                seg_id = 0
+                if seg_key and seg_key.startswith('segment'):
+                    try:
+                        seg_id = int(seg_key.replace('segment', ''))
+                    except ValueError:
+                        seg_id = 0
+                        
+                if (basename, seg_id) in self.feature_map:
+                    valid_samples.append(s)
+                else:
+                    missing_count += 1
+            
+            print(f"Removed {missing_count} samples without features.")
+            filtered_samples = valid_samples
+
+        # Debug statistics
+        unique_trials = set((s['file_path'], s['trial_key']) for s in filtered_samples)
         print(f"Dataset initialized: {len(filtered_samples)} samples (from {len(file_list)} files).")
+        print(f"Unique trials found: {len(unique_trials)}")
+        
         return filtered_samples
 
     def __len__(self):
@@ -220,26 +272,59 @@ class TUEGDataset(Dataset):
         h5_path, trial_key, seg_key = info['file_path'], info['trial_key'], info['segment_key']
         
         data = np.zeros((len(self.channel_indices), self.input_size), dtype=np.float32)
+        
+        # --- IO Optimization: Use Local File Handle (No Cache) ---
+        # HDF5 is not thread-safe. Caching file handles across workers can cause lock contention or pickling issues.
+        # Opening/Closing per item is safer and often faster with OS page cache.
         try:
-            with h5py.File(h5_path, 'r') as f:
+            # Use 'swmr=True' if file is being written to, but 'r' is fine for read-only.
+            # rdcc_nbytes: Raw Data Chunk Cache. Increase to 1MB or 4MB.
+            with h5py.File(h5_path, 'r', rdcc_nbytes=1024*1024, libver='latest') as f:
+                # Read Data
                 group = f[trial_key][seg_key] if seg_key else f[trial_key]
+                dset = None
                 if 'eeg' in group:
-                    raw = group['eeg'][:]
+                    dset = group['eeg']
                 elif 'data' in group:
-                    raw = group['data'][:]
+                    dset = group['data']
                 else:
                     raise KeyError("No data")
 
-                if raw.shape[0] != 21 and raw.shape[1] == 21:
-                    raw = raw.T
+                shape = dset.shape
                 
-                raw = raw[self.channel_indices, :]
+                # Determine orientation: (21, T) or (T, 21)
+                is_transposed = False
+                if len(shape) == 2 and shape[0] != 21 and shape[1] == 21:
+                    is_transposed = True # (T, 21)
+                    time_dim = 0
+                else:
+                    time_dim = 1 # (21, T) or other
+
+                current_len = shape[time_dim]
                 
-                if raw.shape[1] < self.input_size:
+                if current_len >= self.input_size:
+                    # Optimized Slice Read
+                    if is_transposed:
+                        # Data is (T, 21), read (input_size, 21)
+                        # Reading contiguous chunk is faster
+                        raw = dset[:self.input_size, :]
+                        raw = raw.T # Become (21, input_size)
+                    else:
+                        # Data is (21, T), read (21, input_size)
+                        raw = dset[:, :self.input_size]
+                    
+                    # Select channels
+                    data = raw[self.channel_indices, :]
+                else:
+                    # Full read needed for padding
+                    raw = dset[:]
+                    if is_transposed:
+                        raw = raw.T
+                    
+                    raw = raw[self.channel_indices, :]
                     pad = self.input_size - raw.shape[1]
                     data = np.pad(raw, ((0,0), (0, pad)), 'constant')
-                else:
-                    data = raw[:, :self.input_size]
+                    
         except Exception as e:
             # print(f"Error loading {h5_path}: {e}")
             pass

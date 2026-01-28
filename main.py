@@ -62,6 +62,19 @@ def main():
         
     print(f"Loading config from {args.config}")
     
+    # Logic to flatten datasets -> dataset
+    if 'datasets' in config:
+        selected = config.get('selected_dataset')
+        if not selected:
+             # Fallback or error
+             raise ValueError("Config has 'datasets' but no 'selected_dataset' specified.")
+        
+        if selected not in config['datasets']:
+             raise ValueError(f"Selected dataset '{selected}' not found in 'datasets'.")
+             
+        print(f"Active Dataset: {selected}")
+        config['dataset'] = config['datasets'][selected]
+
     # Tiny Mode Logic
     if args.tiny:
         print("!!! TINY MODE ACTIVATED: Using small data subset for debugging !!!")

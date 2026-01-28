@@ -8,11 +8,14 @@ cd "$ROOT_DIR"
 : "${DATASET_DIR:=/vepfs-0x0d/eeg-data/TUAB}"
 : "${WEIGHTS:=output_old/sanity_feat_only/best.pth}"
 : "${DEVICE:=cuda}"
-: "${BATCH_SIZE:=128}"
-: "${NUM_WORKERS:=8}"
-: "${OUT_DIR:=experiments/tuab_lp/features}"
+: "${BATCH_SIZE:=256}"
+: "${NUM_WORKERS:=16}"
+: "${OUT_DIR:=experiments/tuab_lp_feat_only/features}"
 
-python experiments/tuab_lp/extract_features.py \
+export CUDA_VISIBLE_DEVICES=2,3
+
+
+/vepfs-0x0d/home/cx/miniconda3/envs/labram/bin/python experiments/tuab_lp_feat_only/extract_features.py \
   --model_type feat_only \
   --dataset_dir "$DATASET_DIR" \
   --weights_path "$WEIGHTS" \

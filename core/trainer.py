@@ -17,6 +17,10 @@ class Trainer:
         
         self.device = torch.device(config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu'))
         self.model.to(self.device)
+
+        if torch.cuda.device_count() > 1 and self.device.type == 'cuda':
+             print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+             self.model = torch.nn.DataParallel(self.model)
         
         self._setup_optimizer()
         self._setup_loss()
@@ -103,6 +107,7 @@ class Trainer:
             print("Intra-epoch validation disabled (val_freq_split <= 0)")
 
         feature_loss_weight = self.config.get('loss', {}).get('feature_loss_weight', 0.0)
+        use_dynamic_loss = self.config.get('loss', {}).get('use_dynamic_loss', False)
 
         for epoch in range(start_epoch, epochs):
             train_stats = train_one_epoch(
@@ -117,7 +122,8 @@ class Trainer:
                 val_loader=self.val_loader,
                 val_freq=val_freq,
                 task_type=self.config.get('task_type', 'classification'),
-                feature_loss_weight=feature_loss_weight
+                feature_loss_weight=feature_loss_weight,
+                use_dynamic_loss=use_dynamic_loss
             )
             
             # Use 'loss' from returned stats if available, else None
@@ -154,8 +160,19 @@ class Trainer:
                 # Try 'accuracy' if 'acc' is missing (common difference)
                 if metric_key not in val_metrics and 'accuracy' in val_metrics:
                     metric_key = 'accuracy'
-                    
-                current_metric = val_metrics.get(metric_key, -train_stats.get('loss', 0))
+                
+                # Determine metric value (handling minimization for loss)
+                if metric_key in val_metrics:
+                    val_value = val_metrics[metric_key]
+                    # If metric is loss, we want to minimize it. 
+                    # Since the logic below maximizes best_metric, we negate loss.
+                    if 'loss' in metric_key.lower():
+                        current_metric = -val_value
+                    else:
+                        current_metric = val_value
+                else:
+                    # Fallback: use negative training loss (minimize train loss)
+                    current_metric = -train_stats.get('loss', 0)
                 
                 if current_metric > best_metric:
                     best_metric = current_metric
@@ -188,19 +205,34 @@ class Trainer:
                     writer.writeheader()
                     writer.writerow(log_stats)
             else:
-                # Read existing header to ensure order matches or to append new columns if needed (harder)
-                # We'll just append using DictWriter, assuming keys are compatible.
-                # To be safe, we can read the header.
+                # Read existing data to check for header updates
                 with open(csv_file, mode='r', newline='') as f:
-                    reader = csv.reader(f)
-                    header = next(reader)
+                    reader = csv.DictReader(f)
+                    # Handle empty file case
+                    if reader.fieldnames:
+                        header = list(reader.fieldnames)
+                        existing_data = list(reader)
+                    else:
+                        header = []
+                        existing_data = []
                 
-                with open(csv_file, mode='a', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=header)
-                    # Filter log_stats to only include keys in header to avoid ValueError
-                    # Or fill missing with ''
-                    row_to_write = {k: log_stats.get(k, '') for k in header}
-                    writer.writerow(row_to_write)
+                # Check if we have new keys that aren't in the header
+                new_keys = [k for k in log_stats.keys() if k not in header]
+                
+                if new_keys:
+                    print(f"New metrics detected in log: {new_keys}. Updating log.csv structure.")
+                    header.extend(new_keys)
+                    # Rewrite the entire file with new header
+                    with open(csv_file, mode='w', newline='') as f:
+                        writer = csv.DictWriter(f, fieldnames=header)
+                        writer.writeheader()
+                        writer.writerows(existing_data)
+                        writer.writerow(log_stats)
+                else:
+                    # Append to existing file
+                    with open(csv_file, mode='a', newline='') as f:
+                        writer = csv.DictWriter(f, fieldnames=header)
+                        writer.writerow(log_stats)
 
             self.save_checkpoint(f'checkpoint_epoch_{epoch}.pth', epoch=epoch, best_metric=best_metric)
             self.save_checkpoint('latest.pth', epoch=epoch, best_metric=best_metric)
@@ -213,8 +245,9 @@ class Trainer:
             
     def save_checkpoint(self, filename, epoch=None, best_metric=None):
         path = self.output_dir / filename
+        model_to_save = self.model.module if hasattr(self.model, 'module') else self.model
         checkpoint = {
-            'model_state_dict': self.model.state_dict(),
+            'model_state_dict': model_to_save.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'config': self.config,
             'epoch': epoch,
@@ -231,14 +264,15 @@ class Trainer:
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
 
         # Load model state
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        model_to_load = self.model.module if hasattr(self.model, 'module') else self.model
+        model_to_load.load_state_dict(checkpoint['model_state_dict'])
 
         # Load optimizer state
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
         # Load scheduler state if available
-        if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
-            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        # if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
+        #    self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
         # Get epoch and best_metric
         start_epoch = checkpoint.get('epoch', -1) + 1  # Resume from next epoch

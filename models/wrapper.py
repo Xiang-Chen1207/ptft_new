@@ -67,6 +67,7 @@ class CBraModWrapper(nn.Module):
             raise ValueError(f"Unknown strategy: {self.feature_token_strategy}")
         
         self.feat_query = nn.Parameter(torch.zeros(1, num_tokens, self.d_model))
+        nn.init.normal_(self.feat_query, std=0.02)
         self.feat_attn = nn.MultiheadAttention(embed_dim=self.d_model, num_heads=4, batch_first=True)
         
         if self.feature_token_strategy == 'group':

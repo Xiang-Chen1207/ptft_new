@@ -1,0 +1,48 @@
+task_type: classification
+output_dir: output/linear_probe_seed
+device: cuda
+epochs: 50
+clip_grad: 1.0
+metric_key: accuracy
+val_freq_split: 1
+
+# Logging
+enable_wandb: true
+project: "ptft-project-seed-lp"
+entity: "bci-foundation-model" 
+api_key: "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"
+
+# Dataset Selection
+selected_dataset: SEED
+
+datasets:
+  SEED:
+    name: SEED
+    dataset_dir: /vePFS-0x0d/home/downstream_data/SEED
+    cache_path: output/linear_probe_seed/dataset_index.json
+    seed: 42
+    batch_size: 32
+    num_workers: 4
+    input_size: 400
+
+model:
+  use_pretrained: true
+  pretrained_path: /vePFS-0x0d/home/chen/related_projects/CBraMod/pretrained_weights/pretrained_weights.pth
+  in_dim: 200
+  d_model: 200
+  dim_feedforward: 800
+  seq_len: 2
+  n_layer: 12
+  nhead: 8
+  dropout: 0.1
+  num_classes: 3
+  head_type: pooling
+  freeze_backbone: true # Key difference for Linear Probing
+
+loss:
+  name: cross_entropy
+
+optimizer:
+  name: AdamW
+  lr: 0.001 # Higher LR for linear probing
+  weight_decay: 0.05

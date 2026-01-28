@@ -1,15 +1,58 @@
+# --- Python & Environment ---
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+*.egg-info/
+.DS_Store
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+*.swp
+
+# --- Logs & Outputs ---
 wandb/
 output/
-*.pth
+output_old/
+logs/
 *.log
+
+# --- Data & Models ---
+*.pth
+*.ckpt
+*.pt
+*.h5
+*.hdf5
+*.npz
+*.npy
+
+# --- Cache & Indexes ---
+# Ignoring all JSON/CSV/TSV by default as they are likely data or cache in this project
+*.json
 *.csv
+*.tsv
+
+# --- Documentation & Images ---
+# Ignoring generated figures/reports by default
 *.pdf
 *.png
-*.json
-*.ckpt
-*.tsv
-__pycache__/
-*.ipynb_checkpoints
+*.svg
+*.jpg
+*.jpeg
+
+# --- Text Files ---
+# Ignore general text files (often logs or temp outputs)
 *.txt
-*.pyc
-*.npz
+# Exceptions: Keep important project files
+!requirements.txt
+!LICENSE
+!LICENSE.txt
+!README.txt
+!TODO.txt
+
+# --- Jupyter ---
+.ipynb_checkpoints/
